@@ -1,0 +1,43 @@
+{
+  "updated_at_utc": "2026-10-22T14:25:47Z",
+  "sources_total": 13,
+  "sources_ok": 8,
+  "sources_failed": [
+    "https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray",
+    "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2",
+    "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all",
+    "https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg",
+    "https://raw.githubusercontent.com/hezhanleiok/freesub/main/sub.txt"
+  ],
+  "links_raw": 5831,
+  "links_deduped": 4705,
+  "classified_by_name": {
+    "US": 1467,
+    "JP": 144,
+    "KR": 83,
+    "TW": 65
+  },
+  "classified_by_geo": {
+    "US": 90,
+    "JP": 5,
+    "KR": 1,
+    "TW": 1
+  },
+  "candidates_target": 1856,
+  "tested": 1856,
+  "alive": {
+    "US": 280,
+    "JP": 52,
+    "KR": 19,
+    "TW": 15
+  },
+  "final": {
+    "US": 280,
+    "JP": 52,
+    "KR": 19,
+    "TW": 15,
+    "total": 366
+  },
+  "nodes_txt_updated": true,
+  "note": "nodes.txt updated"
+}
