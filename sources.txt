@@ -1,0 +1,20 @@
+# pool2 starter source list — public subscription aggregators.
+# One URL per line; lines starting with # are comments.
+# The aggregator tolerates dead sources (they are reported in status.json),
+# so prune/add freely. Inspired by the source approach of hezhanleiok/freesub.
+#
+# --- base64 / plain share-link subscriptions (long-running public projects) ---
+https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub
+https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
+https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
+https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
+https://raw.githubusercontent.com/freefq/free/master/v2
+https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt
+https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt
+https://raw.githubusercontent.com/ts-sf/fly/main/v2
+https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all
+https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg
+https://raw.githubusercontent.com/ssrsub/ssr/master/v2ray
+https://raw.githubusercontent.com/w1770946466/Auto_proxy/main/Long_term_subscription_num
+# freesub's own output (path may change upstream; failure is tolerated)
+https://raw.githubusercontent.com/hezhanleiok/freesub/main/sub.txt
