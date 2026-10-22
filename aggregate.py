@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 pool2 aggregator: fetch public subscription sources, parse share links,
-keep US/JP/KR/TW only, TCP-liveness-test in the runner, write nodes.txt.
+keep US/JP/KR/TW only, liveness-test in the runner, write nodes.txt.
+
+Two-stage liveness: a cheap TCP connect screen, then a real-proxy test
+that runs the survivors through sing-box and only keeps nodes that
+actually carry traffic (a listening port alone proves nothing).
 
 Pure stdlib. Runs inside GitHub Actions (see .github/workflows/update.yml).
 
@@ -16,8 +20,12 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
+import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -36,6 +44,19 @@ TCP_TIMEOUT = 3.0
 TCP_WORKERS = 120
 MAX_TEST = 8000          # cap on liveness tests per run
 GEO_MAX_IPS = 1000       # cap on ip-api lookups per run
+
+# --- real-proxy test (sing-box) ---
+SING_BOX_VERSION = "1.11.15"
+SING_BOX_URL = (
+    "https://github.com/SagerNet/sing-box/releases/download/"
+    f"v{SING_BOX_VERSION}/sing-box-{SING_BOX_VERSION}-linux-amd64.tar.gz"
+)
+REAL_MAX_TEST = 700       # real-test at most this many TCP-alive nodes
+REAL_BATCH = 80           # nodes per sing-box instance
+REAL_BASE_PORT = 20000    # first mixed-inbound port of each batch
+REAL_TIMEOUT = 6          # curl timeout (s) per node probe
+REAL_WORKERS = 40         # concurrent curl probes
+REAL_TEST_URL = "http://www.gstatic.com/generate_204"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) pool2-aggregator/1.0"
 
 LINK_RE = re.compile(
@@ -75,7 +96,35 @@ def b64_decode_loose(s):
 
 
 def parse_link(raw):
-    """Return dict(proto, host, port, ident, name, raw) or None."""
+    """Return dict(proto, host, port, ident, name, raw, query, vmess)
+    or None."""
+    node = _parse_link_basic(raw)
+    if node is not None:
+        _attach_params(node)
+    return node
+
+
+def _attach_params(node):
+    """Attach structured URI/JSON parameters to a parsed node so the
+    sing-box outbound builder can map tls/reality/transport faithfully.
+    Never fatal: on error the node keeps empty params (and simply fails
+    the real-proxy test if it actually needed them)."""
+    node["query"] = {}
+    node["vmess"] = {}
+    raw = node.get("raw", "")
+    try:
+        if node["proto"] == "vmess":
+            node["vmess"] = json.loads(
+                b64_decode_loose(raw[len("vmess://"):].split("#", 1)[0]))
+            return
+        parts = urllib.parse.urlsplit(raw)
+        qs = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+        node["query"] = {k: v[0] for k, v in qs.items() if v}
+    except Exception:
+        pass
+
+
+def _parse_link_basic(raw):
     raw = raw.strip()
     try:
         if raw.startswith("vmess://"):
@@ -262,6 +311,326 @@ def tcp_alive(node):
     except Exception:
         return False
 
+# ------------------------------------------------------- real proxy test ----
+#
+# A listening TCP port does not mean the node can proxy: the protocol
+# handshake may fail, the credentials may be dead, or the server may
+# accept and drop everything. So survivors of the TCP screen are run
+# through a real sing-box instance and must fetch REAL_TEST_URL.
+
+def _split_csv(v):
+    return [x.strip() for x in str(v or "").split(",") if x.strip()]
+
+
+def _boolish(v):
+    return str(v).strip().lower() in ("1", "true", "yes")
+
+
+def _transport_from(net, host="", path="", service_name=""):
+    """Map a share-link transport to a sing-box transport block.
+    Returns a dict, None for plain tcp, or "UNSUPPORTED"."""
+    net = (net or "").lower()
+    if net in ("", "tcp", "none", "raw"):
+        return None
+    if net == "ws":
+        t = {"type": "ws", "path": path or "/"}
+        if host:
+            t["headers"] = {"Host": host}
+        return t
+    if net == "grpc":
+        return {"type": "grpc", "service_name": service_name or path or ""}
+    if net in ("http", "h2"):
+        t = {"type": "http", "path": path or "/"}
+        if host:
+            t["host"] = _split_csv(host)
+        return t
+    if net == "httpupgrade":
+        t = {"type": "httpupgrade", "path": path or "/"}
+        if host:
+            t["host"] = host
+        return t
+    return "UNSUPPORTED"
+
+
+def _tls_block(server_name="", insecure=False, alpn=None, fingerprint="",
+               reality_pbk=None, reality_sid=""):
+    tls = {"enabled": True}
+    if server_name:
+        tls["server_name"] = server_name
+    if insecure:
+        tls["insecure"] = True
+    if alpn:
+        tls["alpn"] = alpn
+    if fingerprint:
+        tls["utls"] = {"enabled": True, "fingerprint": fingerprint}
+    if reality_pbk is not None:
+        tls["reality"] = {"enabled": True, "public_key": reality_pbk,
+                          "short_id": reality_sid or ""}
+    return tls
+
+
+def build_outbound(node, tag):
+    """Map a parsed share-link node to a sing-box outbound dict, keeping
+    tls/reality/transport parameters as faithful as the link allows.
+    Returns None when parameters cannot be mapped; such a node simply
+    fails the real-proxy test instead of being guessed at."""
+    proto = node["proto"]
+    q = node.get("query") or {}
+    ob = {"tag": tag, "server": node["host"], "server_port": node["port"]}
+    try:
+        if proto == "vless":
+            ob["type"] = "vless"
+            ob["uuid"] = node["ident"]
+            if q.get("flow"):
+                ob["flow"] = q["flow"]
+            security = q.get("security", "").lower()
+            if security in ("tls", "reality"):
+                pbk = q.get("pbk", "") if security == "reality" else None
+                if security == "reality" and not pbk:
+                    return None
+                ob["tls"] = _tls_block(
+                    server_name=q.get("sni") or q.get("host", ""),
+                    insecure=_boolish(q.get("allowInsecure", "")),
+                    alpn=_split_csv(q.get("alpn", "")),
+                    fingerprint=q.get("fp") or q.get("fingerprint", ""),
+                    reality_pbk=pbk, reality_sid=q.get("sid", ""))
+            elif security not in ("", "none"):
+                return None
+            tr = _transport_from(q.get("type", ""), q.get("host", ""),
+                                 q.get("path", ""),
+                                 q.get("serviceName", ""))
+            if tr == "UNSUPPORTED":
+                return None
+            if tr:
+                ob["transport"] = tr
+        elif proto == "trojan":
+            ob["type"] = "trojan"
+            ob["password"] = node["ident"]
+            if q.get("security", "tls").lower() != "none":
+                ob["tls"] = _tls_block(
+                    server_name=(q.get("sni") or q.get("peer")
+                                 or q.get("host", "")),
+                    insecure=_boolish(q.get("allowInsecure", "")),
+                    alpn=_split_csv(q.get("alpn", "")),
+                    fingerprint=q.get("fp", ""))
+            tr = _transport_from(q.get("type", ""), q.get("host", ""),
+                                 q.get("path", ""),
+                                 q.get("serviceName", ""))
+            if tr == "UNSUPPORTED":
+                return None
+            if tr:
+                ob["transport"] = tr
+        elif proto == "vmess":
+            d = node.get("vmess") or {}
+            ob["type"] = "vmess"
+            ob["uuid"] = str(d.get("id", ""))
+            if not ob["uuid"]:
+                return None
+            try:
+                ob["alter_id"] = int(d.get("aid", 0) or 0)
+            except (TypeError, ValueError):
+                return None
+            scy = str(d.get("scy", "auto") or "auto").lower()
+            if scy not in ("auto", "aes-128-gcm", "chacha20-poly1305",
+                          "none", "zero"):
+                return None
+            ob["security"] = scy
+            if str(d.get("tls", "")).lower() == "tls":
+                ob["tls"] = _tls_block(
+                    server_name=str(d.get("sni", "") or d.get("host", "")),
+                    alpn=_split_csv(d.get("alpn", "")))
+            net = str(d.get("net", "tcp") or "tcp")
+            if net == "tcp" and str(d.get("type", "")).lower() \
+                    not in ("", "none"):
+                return None  # tcp http-camouflage header: not mapped
+            tr = _transport_from(net, str(d.get("host", "")),
+                                 str(d.get("path", "")),
+                                 str(d.get("path", "")))
+            if tr == "UNSUPPORTED":
+                return None
+            if tr:
+                ob["transport"] = tr
+        elif proto == "ss":
+            if ":" not in node["ident"]:
+                return None
+            method, password = node["ident"].split(":", 1)
+            ob["type"] = "shadowsocks"
+            ob["method"] = method
+            ob["password"] = password
+            plugin = q.get("plugin", "")
+            if plugin:
+                parts = plugin.split(";")
+                ob["plugin"] = parts[0]
+                if len(parts) > 1:
+                    ob["plugin_opts"] = ";".join(parts[1:])
+        elif proto == "hysteria2":
+            ob["type"] = "hysteria2"
+            ob["password"] = node["ident"]
+            ob["tls"] = _tls_block(
+                server_name=q.get("sni") or q.get("peer", ""),
+                insecure=_boolish(q.get("insecure", "")),
+                alpn=_split_csv(q.get("alpn", "")))
+            if q.get("obfs"):
+                ob["obfs"] = {"type": q["obfs"],
+                              "password": q.get("obfs-password", "")}
+        else:
+            return None
+    except Exception:
+        return None
+    return ob
+
+
+def download_sing_box(workdir):
+    """Download the pinned sing-box release. Returns binary path or
+    None (caller falls back to TCP-only results; never fatal)."""
+    tarball = os.path.join(workdir, "sing-box.tar.gz")
+    try:
+        req = urllib.request.Request(SING_BOX_URL,
+                                     headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=180) as resp, \
+                open(tarball, "wb") as fh:
+            shutil.copyfileobj(resp, fh)
+        binary = os.path.join(workdir, "sing-box")
+        with tarfile.open(tarball, "r:gz") as tf:
+            member = next(m for m in tf.getmembers()
+                          if m.name.endswith("/sing-box") and m.isfile())
+            with tf.extractfile(member) as src, \
+                    open(binary, "wb") as fh:
+                shutil.copyfileobj(src, fh)
+        os.chmod(binary, 0o755)
+        return binary
+    except Exception as exc:
+        print(f"[real] sing-box download failed: {exc}", file=sys.stderr)
+        return None
+
+
+def _batch_config(items):
+    """items: list of (node, outbound, port) -> one sing-box config with
+    a dedicated mixed inbound per node, routed 1:1 to its outbound."""
+    inbounds, outbounds, rules = [], [], []
+    for i, (_node, ob, port) in enumerate(items):
+        inbounds.append({"type": "mixed", "tag": f"in{i}",
+                         "listen": "127.0.0.1", "listen_port": port})
+        outbounds.append(ob)
+        rules.append({"inbound": [f"in{i}"], "outbound": ob["tag"]})
+    outbounds += [{"type": "direct", "tag": "direct"},
+                  {"type": "block", "tag": "block"}]
+    return {"log": {"level": "error"},
+            "inbounds": inbounds, "outbounds": outbounds,
+            "route": {"rules": rules, "final": "block"}}
+
+
+def _write_config(workdir, name, config):
+    path = os.path.join(workdir, name)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(config, fh)
+    return path
+
+
+def _check_ok(binary, workdir, name, config):
+    path = _write_config(workdir, name, config)
+    try:
+        r = subprocess.run([binary, "check", "-c", path],
+                           capture_output=True, text=True, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _filter_valid(binary, workdir, items):
+    """Drop items whose outbound sing-box rejects. Whole-batch check
+    first; if it fails, per-node checks isolate the bad ones."""
+    if not items:
+        return items
+    if _check_ok(binary, workdir, "check-batch.json", _batch_config(items)):
+        return items
+    valid = []
+    for item in items:
+        single = {"log": {"level": "error"},
+                  "outbounds": [item[1], {"type": "direct", "tag": "direct"}]}
+        if _check_ok(binary, workdir, "check-one.json", single):
+            valid.append(item)
+    return valid
+
+
+def _probe(port):
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", str(REAL_TIMEOUT),
+             "-x", f"socks5h://127.0.0.1:{port}", REAL_TEST_URL],
+            capture_output=True, text=True, timeout=REAL_TIMEOUT + 10)
+        return r.stdout.strip() in ("200", "204")
+    except Exception:
+        return False
+
+
+def _wait_ports(proc, ports, deadline_s=25):
+    deadline = time.time() + deadline_s
+    pending = set(ports)
+    while pending and time.time() < deadline:
+        if proc.poll() is not None:
+            return False
+        for p in list(pending):
+            try:
+                with socket.create_connection(("127.0.0.1", p), timeout=0.3):
+                    pending.discard(p)
+            except Exception:
+                pass
+        if pending:
+            time.sleep(0.2)
+    return not pending
+
+
+def _run_batch(binary, workdir, items):
+    """Start one sing-box for the batch and probe every node through
+    its own inbound port. Returns the set of id(node) that proxied."""
+    cfg_path = _write_config(workdir, "run-batch.json", _batch_config(items))
+    log_path = os.path.join(workdir, "sing-box.log")
+    with open(log_path, "ab") as log_fh:
+        proc = subprocess.Popen([binary, "run", "-c", cfg_path],
+                                stdout=log_fh, stderr=log_fh)
+    try:
+        ports = [port for (_n, _o, port) in items]
+        if not _wait_ports(proc, ports):
+            print(f"[real] batch sing-box not ready (rc={proc.poll()})",
+                  file=sys.stderr)
+            return set()
+        with cf.ThreadPoolExecutor(max_workers=REAL_WORKERS) as ex:
+            results = list(ex.map(_probe, ports))
+        return {id(node) for (node, _o, _p), ok in zip(items, results) if ok}
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+
+
+def real_test(nodes, workdir):
+    """Real-proxy test of TCP-alive nodes (already in priority order).
+    Returns (passed_nodes, info), or None when the sing-box download
+    failed and the caller must fall back to the TCP results."""
+    binary = download_sing_box(workdir)
+    if not binary:
+        return None
+    passed, tested = [], 0
+    for start in range(0, len(nodes), REAL_BATCH):
+        chunk = nodes[start:start + REAL_BATCH]
+        tested += len(chunk)
+        items = []
+        for i, node in enumerate(chunk):
+            ob = build_outbound(node, f"out{i}")
+            if ob is not None:
+                items.append((node, ob, REAL_BASE_PORT + i))
+        items = _filter_valid(binary, workdir, items)
+        if not items:
+            continue
+        ok_ids = _run_batch(binary, workdir, items)
+        passed += [n for (n, _o, _p) in items if id(n) in ok_ids]
+        print(f"[real] batch @{start}: {len(ok_ids)}/{len(items)} alive")
+    return passed, {"tested": tested}
+
 # ----------------------------------------------------------------- main ----
 
 def main():
@@ -272,6 +641,7 @@ def main():
         "classified_by_name": {}, "classified_by_geo": {},
         "candidates_target": 0, "tested": 0,
         "alive": {}, "final": {}, "nodes_txt_updated": False, "note": "",
+        "real_test": "not_run", "real_tested": 0, "real_alive": {},
     }
 
     with open(SOURCES_FILE, encoding="utf-8") as fh:
@@ -352,10 +722,40 @@ def main():
     for node, ok in zip(to_test, results):
         if ok:
             alive.append(node)
+    tcp_by_cc = {c: [n for n in alive if n["cc"] == c]
+                 for c in TARGET_COUNTRIES}
+    status["alive"] = {c: len(v) for c, v in tcp_by_cc.items()}
+    print(f"[tcp] alive: {status['alive']}")
+
+    # real-proxy test: only nodes that actually carry traffic survive.
+    # Any failure here degrades to the TCP results, never to a crash.
+    if alive:
+        status["real_test"] = "ok"
+        workdir = tempfile.mkdtemp(prefix="pool2-sb-")
+        try:
+            outcome = real_test(alive[:REAL_MAX_TEST], workdir)
+        except Exception as exc:
+            print(f"[real] test crashed, TCP fallback: {exc}",
+                  file=sys.stderr)
+            outcome = "error"
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        if outcome is None:
+            status["real_test"] = "skipped_download_failed"
+        elif outcome == "error":
+            status["real_test"] = "skipped_error"
+        else:
+            alive, info = outcome
+            status["real_tested"] = info["tested"]
+            ra = {c: 0 for c in TARGET_COUNTRIES}
+            for n in alive:
+                ra[n["cc"]] += 1
+            status["real_alive"] = ra
+        print(f"[real] status={status['real_test']} "
+              f"tested={status['real_tested']} alive={status['real_alive']}")
+
     alive_by_cc = {c: [n for n in alive if n["cc"] == c]
                    for c in TARGET_COUNTRIES}
-    status["alive"] = {c: len(v) for c, v in alive_by_cc.items()}
-    print(f"[tcp] alive: {status['alive']}")
 
     # selection: per-country caps, US first, then backfill to MAX_TOTAL
     final = []
