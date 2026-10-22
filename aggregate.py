@@ -895,6 +895,25 @@ def main():
     alive_by_cc = {c: [n for n in alive if n["cc"] == c]
                    for c in TARGET_COUNTRIES}
 
+    # protocol priority: from CN networks bare ss/vmess get blocked far
+    # more often than vless-reality / hysteria2; front-load the protocols
+    # that survive so client auto-select groups land on a working node
+    # instead of drowning in dead ss (30 of 51 in the 2026-10-23 batch).
+    def _proto_rank(n):
+        raw = n["raw"]
+        if raw.startswith("vless://"):
+            return 0 if "security=reality" in raw else 1
+        if raw.startswith(("hysteria2://", "hy2://")):
+            return 2
+        if raw.startswith("trojan://"):
+            return 3
+        if raw.startswith("vmess://"):
+            return 4
+        return 5
+
+    for _cc in TARGET_COUNTRIES:
+        alive_by_cc[_cc].sort(key=_proto_rank)
+
     # selection: per-country caps, US first, then backfill to MAX_TOTAL
     final = []
     for cc in TARGET_COUNTRIES:
