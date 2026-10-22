@@ -1,0 +1,43 @@
+name: Update nodes
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - aggregate.py
+      - sources.txt
+      - .github/workflows/update.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-nodes
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Aggregate, filter (US/JP/KR/TW), liveness-test
+        run: python aggregate.py
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nodes.txt status.json 2>/dev/null || git add status.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update nodes $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push
+          fi
