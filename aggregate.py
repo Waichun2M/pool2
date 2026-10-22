@@ -5,7 +5,10 @@ keep US/JP/KR/TW only, liveness-test in the runner, write nodes.txt.
 
 Two-stage liveness: a cheap TCP connect screen, then a real-proxy test
 that runs the survivors through sing-box and only keeps nodes that
-actually carry traffic (a listening port alone proves nothing).
+actually carry traffic (a listening port alone proves nothing). Nodes
+that proxy must also prove their real exit country (Cloudflare trace
+through the tunnel): name/geo labels lie, so the observed exit country
+is the only classification that counts.
 
 Pure stdlib. Runs inside GitHub Actions (see .github/workflows/update.yml).
 
@@ -51,7 +54,7 @@ SING_BOX_URL = (
     "https://github.com/SagerNet/sing-box/releases/download/"
     f"v{SING_BOX_VERSION}/sing-box-{SING_BOX_VERSION}-linux-amd64.tar.gz"
 )
-REAL_MAX_TEST = 700       # real-test at most this many TCP-alive nodes
+REAL_MAX_TEST = 1200      # real-test at most this many TCP-alive nodes
 REAL_BATCH = 80           # nodes per sing-box instance
 REAL_BASE_PORT = 20000    # first mixed-inbound port of each batch
 REAL_TIMEOUT = 6          # curl timeout (s) per node probe
@@ -565,6 +568,76 @@ def _probe(port):
         return False
 
 
+# --- exit-country verification -------------------------------------------
+#
+# A node's advertised country (name flag / server IP geo) is unreliable:
+# sources mislabel, and anycast/transit exits land elsewhere. The only
+# trustworthy signal is the country the traffic actually exits from,
+# observed through the tunnel itself via Cloudflare's trace endpoint.
+
+TRACE_URL = "http://www.cloudflare.com/cdn-cgi/trace"
+TRACE_TIMEOUT = 6         # curl timeout (s) for the trace probe
+_LOC_RE = re.compile(r"^loc=([A-Za-z]{2})\s*$", re.M)
+
+
+def parse_trace_loc(text):
+    """Extract the exit country code from a /cdn-cgi/trace body.
+    Returns an upper-case 2-letter code or None."""
+    if not text:
+        return None
+    m = _LOC_RE.search(text)
+    return m.group(1).upper() if m else None
+
+
+def exit_verdict(loc):
+    """Final country for a node given its observed exit loc, or None
+    when the node must be dropped: unverifiable exits and exits outside
+    the target whitelist are both rejected (better fewer, real nodes)."""
+    if not loc:
+        return None
+    loc = str(loc).strip().upper()
+    return loc if loc in TARGET_COUNTRIES else None
+
+
+def _probe_exit_loc(port):
+    """Fetch the trace endpoint through the node's own SOCKS inbound
+    and return the observed exit country (or None on any failure)."""
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "--max-time", str(TRACE_TIMEOUT),
+             "-x", f"socks5h://127.0.0.1:{port}", TRACE_URL],
+            capture_output=True, text=True, timeout=TRACE_TIMEOUT + 10)
+        if r.returncode != 0:
+            return None
+        return parse_trace_loc(r.stdout)
+    except Exception:
+        return None
+
+
+def apply_exit_results(ok_items, locs):
+    """Apply exit-country verdicts to the nodes of one batch that
+    passed the traffic probe. Returns (passed, stats): passed maps
+    id(node) -> verified exit country; stats counts how many
+    traffic-passing nodes were dropped over their exit (mismatch =
+    observed loc outside the whitelist, unverified = no loc at all)
+    and tallies every observed exit country in by_exit."""
+    passed = {}
+    stats = {"passed_204": len(ok_items), "mismatch": 0,
+             "unverified": 0, "by_exit": {}}
+    for (node, _ob, _port), loc in zip(ok_items, locs):
+        if loc:
+            stats["by_exit"][loc] = stats["by_exit"].get(loc, 0) + 1
+        verdict = exit_verdict(loc)
+        if verdict is None:
+            if loc:
+                stats["mismatch"] += 1
+            else:
+                stats["unverified"] += 1
+            continue
+        passed[id(node)] = verdict
+    return passed, stats
+
+
 def _wait_ports(proc, ports, deadline_s=25):
     deadline = time.time() + deadline_s
     pending = set(ports)
@@ -584,7 +657,12 @@ def _wait_ports(proc, ports, deadline_s=25):
 
 def _run_batch(binary, workdir, items):
     """Start one sing-box for the batch and probe every node through
-    its own inbound port. Returns the set of id(node) that proxied."""
+    its own inbound port: first the traffic probe (generate_204), then
+    for the passers an exit-country probe (Cloudflare trace through the
+    same tunnel). Returns (passed, stats) where passed maps id(node) ->
+    verified exit country; nodes whose real exit is outside the
+    whitelist, or whose exit cannot be verified, are dropped."""
+    empty = {"passed_204": 0, "mismatch": 0, "unverified": 0, "by_exit": {}}
     cfg_path = _write_config(workdir, "run-batch.json", _batch_config(items))
     log_path = os.path.join(workdir, "sing-box.log")
     with open(log_path, "ab") as log_fh:
@@ -595,10 +673,16 @@ def _run_batch(binary, workdir, items):
         if not _wait_ports(proc, ports):
             print(f"[real] batch sing-box not ready (rc={proc.poll()})",
                   file=sys.stderr)
-            return set()
+            return {}, empty
         with cf.ThreadPoolExecutor(max_workers=REAL_WORKERS) as ex:
             results = list(ex.map(_probe, ports))
-        return {id(node) for (node, _o, _p), ok in zip(items, results) if ok}
+        ok_items = [item for item, ok in zip(items, results) if ok]
+        if not ok_items:
+            return {}, empty
+        with cf.ThreadPoolExecutor(max_workers=REAL_WORKERS) as ex:
+            locs = list(ex.map(_probe_exit_loc,
+                               [port for (_n, _o, port) in ok_items]))
+        return apply_exit_results(ok_items, locs)
     finally:
         proc.terminate()
         try:
@@ -609,12 +693,18 @@ def _run_batch(binary, workdir, items):
 
 def real_test(nodes, workdir):
     """Real-proxy test of TCP-alive nodes (already in priority order).
+    A node passes only if it carries traffic AND its observed exit
+    country (Cloudflare trace through the tunnel) is in the target
+    whitelist; the verified exit then overwrites node["cc"], so every
+    downstream count and cap uses the real exit, never the label.
     Returns (passed_nodes, info), or None when the sing-box download
     failed and the caller must fall back to the TCP results."""
     binary = download_sing_box(workdir)
     if not binary:
         return None
     passed, tested = [], 0
+    agg_stats = {"passed_204": 0, "mismatch": 0, "unverified": 0,
+                 "by_exit": {}}
     for start in range(0, len(nodes), REAL_BATCH):
         chunk = nodes[start:start + REAL_BATCH]
         tested += len(chunk)
@@ -626,10 +716,26 @@ def real_test(nodes, workdir):
         items = _filter_valid(binary, workdir, items)
         if not items:
             continue
-        ok_ids = _run_batch(binary, workdir, items)
-        passed += [n for (n, _o, _p) in items if id(n) in ok_ids]
-        print(f"[real] batch @{start}: {len(ok_ids)}/{len(items)} alive")
-    return passed, {"tested": tested}
+        verdicts, bstats = _run_batch(binary, workdir, items)
+        for key in ("passed_204", "mismatch", "unverified"):
+            agg_stats[key] += bstats[key]
+        for loc, cnt in bstats["by_exit"].items():
+            agg_stats["by_exit"][loc] = \
+                agg_stats["by_exit"].get(loc, 0) + cnt
+        for (node, _o, _p) in items:
+            loc = verdicts.get(id(node))
+            if loc:
+                node["cc"] = loc  # real exit overrides name/geo label
+                passed.append(node)
+        print(f"[real] batch @{start}: {len(verdicts)}/{len(items)} alive "
+              f"(traffic-ok {bstats['passed_204']}, "
+              f"exit-dropped {bstats['mismatch'] + bstats['unverified']})")
+    info = {"tested": tested,
+            "passed_204": agg_stats["passed_204"],
+            "exit_mismatch_dropped": agg_stats["mismatch"],
+            "exit_unverified_dropped": agg_stats["unverified"],
+            "by_exit": agg_stats["by_exit"]}
+    return passed, info
 
 # ----------------------------------------------------------------- main ----
 
@@ -642,6 +748,8 @@ def main():
         "candidates_target": 0, "tested": 0,
         "alive": {}, "final": {}, "nodes_txt_updated": False, "note": "",
         "real_test": "not_run", "real_tested": 0, "real_alive": {},
+        "real_tested_by_exit": {}, "exit_mismatch_dropped": 0,
+        "exit_unverified_dropped": 0,
     }
 
     with open(SOURCES_FILE, encoding="utf-8") as fh:
@@ -747,6 +855,13 @@ def main():
         else:
             alive, info = outcome
             status["real_tested"] = info["tested"]
+            status["real_tested_by_exit"] = info.get("by_exit", {})
+            status["exit_mismatch_dropped"] = \
+                info.get("exit_mismatch_dropped", 0)
+            status["exit_unverified_dropped"] = \
+                info.get("exit_unverified_dropped", 0)
+            # node["cc"] was overwritten with the verified exit country
+            # during the real test, so this counts exits, not labels.
             ra = {c: 0 for c in TARGET_COUNTRIES}
             for n in alive:
                 ra[n["cc"]] += 1
