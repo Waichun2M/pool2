@@ -45,3 +45,6 @@ https://raw.githubusercontent.com/KwinShadow/TelegramV2rayCollector/main/sublink
 https://raw.githubusercontent.com/mrvcoder/V2rayCollector/main/vless_iran.txt
 # ripaojiedian/freenode daily-disposable nodes (~13 links)
 https://raw.githubusercontent.com/ripaojiedian/freenode/main/sub
+
+# --- VPN Gate volunteers, pre-converted to vless links (sdise/vpngate, updated daily) ---
+https://raw.githubusercontent.com/sdise/vpngate/main/vpngate-v2ray.txt
