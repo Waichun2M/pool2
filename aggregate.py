@@ -798,7 +798,17 @@ def main():
         node = parse_link(raw)
         if not node:
             continue
-        key = (node["proto"], node["host"].lower(), node["port"], node["ident"])
+        # relay-style links (sdise VPN Gate volunteers) all share one
+        # host/uuid and differ only in the ws path, which carries the
+        # real target; without the path in the key they collapse to 1.
+        _q = node.get("query") or {}
+        _path = ""
+        try:
+            _path = (_q.get("path") or [""])[0]
+        except Exception:
+            _path = ""
+        key = (node["proto"], node["host"].lower(), node["port"],
+               node["ident"], _path)
         if key in seen:
             continue
         seen.add(key)
