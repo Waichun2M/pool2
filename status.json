@@ -1,54 +1,55 @@
 {
-  "updated_at_utc": "2026-10-22T15:39:57Z",
+  "updated_at_utc": "2026-10-22T16:01:57Z",
   "sources_total": 23,
   "sources_ok": 23,
   "sources_failed": [],
-  "links_raw": 44983,
-  "links_deduped": 18824,
+  "links_raw": 44911,
+  "links_deduped": 18788,
   "classified_by_name": {
-    "US": 2492,
+    "US": 2484,
     "JP": 204,
     "KR": 102,
     "TW": 82
   },
   "classified_by_geo": {
-    "US": 164,
-    "JP": 12,
-    "KR": 10,
-    "TW": 4
+    "US": 188,
+    "JP": 10,
+    "KR": 9,
+    "TW": 2
   },
-  "candidates_target": 3070,
-  "tested": 3070,
+  "candidates_target": 3081,
+  "tested": 3081,
   "alive": {
-    "US": 1020,
-    "JP": 74,
+    "US": 1036,
+    "JP": 73,
     "KR": 32,
-    "TW": 17
+    "TW": 19
   },
   "final": {
-    "US": 36,
-    "JP": 10,
+    "US": 39,
+    "JP": 6,
     "KR": 5,
-    "TW": 0,
+    "TW": 1,
     "total": 51
   },
   "nodes_txt_updated": true,
   "note": "nodes.txt updated",
   "real_test": "ok",
-  "real_tested": 1143,
+  "real_tested": 1160,
   "real_alive": {
-    "US": 36,
-    "JP": 10,
+    "US": 39,
+    "JP": 6,
     "KR": 5,
-    "TW": 0
+    "TW": 1
   },
   "real_tested_by_exit": {
     "RU": 1,
-    "US": 36,
+    "US": 39,
     "CH": 1,
-    "JP": 10,
-    "KR": 5
+    "JP": 6,
+    "KR": 5,
+    "TW": 1
   },
   "exit_mismatch_dropped": 2,
-  "exit_unverified_dropped": 4
+  "exit_unverified_dropped": 3
 }
