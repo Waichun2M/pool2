@@ -739,6 +739,29 @@ def real_test(nodes, workdir):
 
 # ----------------------------------------------------------------- main ----
 
+FLAG_EMOJI = {"US": "🇺🇸", "JP": "🇯🇵", "KR": "🇰🇷", "TW": "🇹🇼"}
+
+
+def _rename_link(raw, label):
+    """Rewrite a share link's display name (fragment / vmess ps) to a
+    safe label. Aggregator names carry YAML-breaking characters
+    (unclosed '[', ':', '|', '#', stray emoji) that crash subscription
+    converters (edgetunnel /sub returned HTTP 400 for Clash clients);
+    the name is cosmetic, so replace it wholesale."""
+    try:
+        if raw.startswith("vmess://"):
+            payload = raw[len("vmess://"):].split("#")[0]
+            data = json.loads(base64.b64decode(
+                payload + "=" * (-len(payload) % 4)).decode("utf-8"))
+            data["ps"] = label
+            return "vmess://" + base64.b64encode(json.dumps(
+                data, ensure_ascii=False).encode("utf-8")).decode()
+        base = raw.split("#", 1)[0]
+        return base + "#" + urllib.parse.quote(label, safe="")
+    except Exception:
+        return raw
+
+
 def main():
     status = {
         "updated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -889,6 +912,15 @@ def main():
                    for c in TARGET_COUNTRIES}
     status["final"] = {**final_by_cc, "total": len(final)}
     print(f"[final] {status['final']}")
+
+    # sanitize display names before writing (see _rename_link)
+    _counters = {}
+    for n in final:
+        proto = n["raw"].split("://", 1)[0].lower()
+        _counters[n["cc"]] = _counters.get(n["cc"], 0) + 1
+        label = (f'{FLAG_EMOJI.get(n["cc"], "")} {n["cc"]} '
+                 f'{proto} {_counters[n["cc"]]:02d}').strip()
+        n["raw"] = _rename_link(n["raw"], label)
 
     # anti-wipe write
     if len(final) >= MIN_NODES:
