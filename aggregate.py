@@ -802,11 +802,8 @@ def main():
         # host/uuid and differ only in the ws path, which carries the
         # real target; without the path in the key they collapse to 1.
         _q = node.get("query") or {}
-        _path = ""
-        try:
-            _path = (_q.get("path") or [""])[0]
-        except Exception:
-            _path = ""
+        _pv = _q.get("path") or ""
+        _path = _pv[0] if isinstance(_pv, list) else _pv
         key = (node["proto"], node["host"].lower(), node["port"],
                node["ident"], _path)
         if key in seen:
