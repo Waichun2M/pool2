@@ -1,34 +1,34 @@
 {
-  "updated_at_utc": "2026-10-23T00:26:48Z",
+  "updated_at_utc": "2026-10-23T05:06:01Z",
   "sources_total": 23,
   "sources_ok": 23,
   "sources_failed": [],
-  "links_raw": 44908,
-  "links_deduped": 19945,
+  "links_raw": 44893,
+  "links_deduped": 19983,
   "classified_by_name": {
-    "US": 2606,
-    "JP": 208,
-    "KR": 109,
-    "TW": 90
+    "US": 2609,
+    "JP": 200,
+    "KR": 112,
+    "TW": 100
   },
   "classified_by_geo": {
-    "US": 166,
-    "JP": 13,
+    "US": 170,
+    "JP": 9,
     "KR": 10,
-    "TW": 2
+    "TW": 3
   },
-  "candidates_target": 3204,
-  "tested": 3204,
+  "candidates_target": 3213,
+  "tested": 3213,
   "alive": {
-    "US": 1114,
-    "JP": 61,
-    "KR": 34,
-    "TW": 23
+    "US": 1129,
+    "JP": 69,
+    "KR": 40,
+    "TW": 32
   },
   "final": {
-    "US": 39,
-    "JP": 10,
-    "KR": 5,
+    "US": 43,
+    "JP": 11,
+    "KR": 0,
     "TW": 0,
     "total": 54
   },
@@ -37,21 +37,19 @@
   "real_test": "ok",
   "real_tested": 1200,
   "real_alive": {
-    "US": 39,
-    "JP": 10,
-    "KR": 5,
+    "US": 43,
+    "JP": 11,
+    "KR": 0,
     "TW": 0
   },
   "real_tested_by_exit": {
-    "NL": 1,
-    "FI": 1,
-    "IT": 1,
-    "US": 39,
-    "SG": 1,
-    "CH": 1,
-    "JP": 10,
-    "KR": 5
+    "EE": 1,
+    "CA": 1,
+    "JP": 11,
+    "US": 43,
+    "DE": 1,
+    "CH": 1
   },
-  "exit_mismatch_dropped": 5,
-  "exit_unverified_dropped": 8
+  "exit_mismatch_dropped": 4,
+  "exit_unverified_dropped": 7
 }
