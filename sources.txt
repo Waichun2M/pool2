@@ -1,7 +1,47 @@
-# pool2 source list — VPN Gate volunteers ONLY (user decision 2026-10-23:
-# scraped public aggregator nodes were useless in practice; volunteers
-# are real residential IPs with accurate exits).
-# sdise/vpngate: VPN Gate volunteers pre-converted to vless links,
-# updated daily by its maintainer; pool2 still re-tests every node
-# (sing-box real proxy test + verified exit country) before serving.
-https://raw.githubusercontent.com/sdise/vpngate/main/vpngate-v2ray.txt
+# pool2 source list — public subscription aggregators.
+# One URL per line; lines starting with # are comments.
+# The aggregator tolerates dead sources (they are reported in status.json),
+# so prune/add freely. Inspired by the source approach of hezhanleiok/freesub.
+#
+# --- base64 / plain share-link subscriptions (long-running public projects) ---
+https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub
+https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
+https://raw.githubusercontent.com/freefq/free/master/v2
+https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt
+https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt
+https://raw.githubusercontent.com/ts-sf/fly/main/v2
+https://raw.githubusercontent.com/ssrsub/ssr/master/v2ray
+https://raw.githubusercontent.com/w1770946466/Auto_proxy/main/Long_term_subscription_num
+#
+# --- added 2026-10-22 expansion; every URL curl-verified that day with the
+# --- aggregator's own extractor (link counts noted), none admitted unverified ---
+# Epodonios/v2ray-configs merged feed (~7573 links)
+https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt
+# coldwater-10/V2ray-Config per-protocol split, vless (~17262 links)
+https://raw.githubusercontent.com/coldwater-10/V2ray-Config/main/Splitted-By-Protocol/vless.txt
+# Surfboardv2ray/TGParse telegram collector, mixed protocols (~7041 links)
+https://raw.githubusercontent.com/Surfboardv2ray/TGParse/main/splitted/mixed
+# ALIILAPRO/v2rayNG-Config merged sub (~3612 links)
+https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt
+# Au1rxx/free-vpn-subscriptions verified feed, base64 chunk 1 (~1994 links)
+https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/all-verified/v2ray-base64-0001.txt
+# chengaopan/AutoMergePublicNodes auto-merged list (~428 links)
+https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt
+# Leon406/SubCrawler share pool v2 (~339 links)
+https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/v2
+# V2RayRoot/V2RayConfig telegram collector, vless (~263 links)
+https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/main/Config/vless.txt
+# roosterkid/openproxylist daily v2ray list (~150 links)
+https://raw.githubusercontent.com/roosterkid/openproxylist/main/V2RAY_RAW.txt
+# hezhanleiok/freesub by-country output, US slice (~128 links)
+https://raw.githubusercontent.com/hezhanleiok/freesub/main/output/by-country/US.txt
+# mfuu/v2ray merged sub, current path is /master/sub (~99 links)
+https://raw.githubusercontent.com/mfuu/v2ray/master/sub
+# aiboboxx/v2rayfree current path is /main/sub (~85 links)
+https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/sub
+# KwinShadow/TelegramV2rayCollector mixed sublinks (~84 links)
+https://raw.githubusercontent.com/KwinShadow/TelegramV2rayCollector/main/sublinks/mix.txt
+# mrvcoder/V2rayCollector vless feed (~81 links)
+https://raw.githubusercontent.com/mrvcoder/V2rayCollector/main/vless_iran.txt
+# ripaojiedian/freenode daily-disposable nodes (~13 links)
+https://raw.githubusercontent.com/ripaojiedian/freenode/main/sub
