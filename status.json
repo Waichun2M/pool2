@@ -1,56 +1,58 @@
 {
-  "updated_at_utc": "2026-10-28T13:18:04Z",
+  "updated_at_utc": "2026-10-28T22:43:54Z",
   "sources_total": 23,
   "sources_ok": 22,
   "sources_failed": [
     "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt"
   ],
-  "links_raw": 38519,
-  "links_deduped": 20160,
+  "links_raw": 38534,
+  "links_deduped": 19982,
   "classified_by_name": {
-    "US": 2839,
-    "JP": 261,
-    "KR": 132,
-    "TW": 93
+    "US": 2774,
+    "JP": 226,
+    "KR": 114,
+    "TW": 91
   },
   "classified_by_geo": {
-    "US": 221,
-    "JP": 61,
+    "US": 287,
+    "JP": 9,
     "KR": 8,
-    "TW": 3
+    "TW": 2
   },
-  "candidates_target": 3618,
-  "tested": 3618,
+  "candidates_target": 3511,
+  "tested": 3511,
   "alive": {
-    "US": 1290,
-    "JP": 127,
-    "KR": 40,
-    "TW": 21
+    "US": 1332,
+    "JP": 66,
+    "KR": 32,
+    "TW": 18
   },
   "final": {
-    "US": 63,
-    "JP": 0,
+    "US": 70,
+    "JP": 1,
     "KR": 0,
     "TW": 0,
-    "total": 63
+    "total": 71
   },
   "nodes_txt_updated": true,
   "note": "nodes.txt updated",
   "real_test": "ok",
   "real_tested": 1200,
   "real_alive": {
-    "US": 63,
-    "JP": 0,
+    "US": 70,
+    "JP": 1,
     "KR": 0,
     "TW": 0
   },
   "real_tested_by_exit": {
-    "NL": 2,
-    "IT": 1,
-    "US": 63,
+    "US": 70,
+    "PH": 1,
+    "FI": 1,
     "MX": 1,
-    "CH": 1
+    "JP": 1,
+    "NL": 1,
+    "CH": 2
   },
-  "exit_mismatch_dropped": 5,
-  "exit_unverified_dropped": 12
+  "exit_mismatch_dropped": 6,
+  "exit_unverified_dropped": 8
 }
